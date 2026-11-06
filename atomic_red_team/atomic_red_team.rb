@@ -32,6 +32,29 @@ class AtomicRedTeam
   #
   # Returns the individual Atomic Tests for a given identifer, passed as either a string (T1234) or an ATT&CK technique object
   #
+  def atomic_tests_for_technique_by_platform(technique_or_technique_identifier, platform)
+    technique_identifier = if technique_or_technique_identifier.is_a? Hash
+      ATTACK_API.technique_identifier_for_technique technique_or_technique_identifier
+    else
+      technique_or_technique_identifier
+    end
+
+    test_list = Array.new
+    atomic_tests.find do |atomic_yaml| 
+      if atomic_yaml.fetch('attack_technique').upcase == technique_identifier.upcase
+        atomic_yaml['atomic_tests'].each do |a_test|
+          if a_test["supported_platforms"].include?(platform[:platform])
+              test_list.append(a_test)
+          end
+        end
+      end
+    end
+    test_list
+  end
+
+  #
+  # Returns the individual Atomic Tests for a given identifer, passed as either a string (T1234) or an ATT&CK technique object
+  #
   def atomic_tests_for_technique(technique_or_technique_identifier)
     technique_identifier = if technique_or_technique_identifier.is_a? Hash
       ATTACK_API.technique_identifier_for_technique technique_or_technique_identifier
@@ -55,18 +78,18 @@ class AtomicRedTeam
     yaml_file = "#{ATOMICS_DIRECTORY}/#{technique_identifier}/#{technique_identifier}.yaml"
     markdown_file = "#{ATOMICS_DIRECTORY}/#{technique_identifier}/#{technique_identifier}.md"
 
-    if atomic_yaml_has_test_for_platform(yaml_file, only_platform) && (File.exists? markdown_file)
+    if atomic_yaml_has_test_for_platform(yaml_file, only_platform) && (File.exist? markdown_file)
       # we have a file for this technique, so link to it's Markdown file
       "[#{link_display}](../../#{technique_identifier}/#{technique_identifier}.md)"
     else
       # we don't have a file for this technique, or there are not tests for the given platform, so link to an edit page
-      "#{link_display} [CONTRIBUTE A TEST](https://atomicredteam.io/contributing)"
+      "#{link_display} [CONTRIBUTE A TEST](https://github.com/redcanaryco/atomic-red-team/wiki/Contributing)"
     end
   end
 
   def atomic_yaml_has_test_for_platform(yaml_file, only_platform)
     has_test_for_platform = false
-    if File.exists? yaml_file
+    if File.exist? yaml_file
       yaml = YAML.load_file(yaml_file)
       yaml['atomic_tests'].each_with_index do |atomic, i|
         if atomic["supported_platforms"].any? {|platform| platform.downcase =~ only_platform}
@@ -108,7 +131,7 @@ class AtomicRedTeam
       raise("`atomic_tests[#{i}].supported_platforms` element is required") unless atomic.has_key?('supported_platforms')
       raise("`atomic_tests[#{i}].supported_platforms` element must be an Array (was a #{atomic['supported_platforms'].class.name})") unless atomic['supported_platforms'].is_a?(Array)
   
-      valid_supported_platforms = ['windows', 'macos', 'linux']
+      valid_supported_platforms = ['windows', 'macos', 'linux', 'office-365', 'azure-ad', 'google-workspace', 'saas', 'iaas', 'containers', 'iaas:aws', 'iaas:azure', 'iaas:gcp']
       atomic['supported_platforms'].each do |platform|
         if !valid_supported_platforms.include?(platform)
           raise("`atomic_tests[#{i}].supported_platforms` '#{platform}' must be one of #{valid_supported_platforms.join(', ')}")
@@ -142,7 +165,7 @@ class AtomicRedTeam
       raise("`atomic_tests[#{i}].executor.name` element must be a string") unless executor['name'].is_a?(String)
       raise("`atomic_tests[#{i}].executor.name` element must be lowercased and underscored (was #{executor['name']})") unless executor['name'] =~ /[a-z_]+/
   
-      valid_executor_types = ['command_prompt', 'sh', 'bash', 'powershell', 'manual']
+      valid_executor_types = ['command_prompt', 'sh', 'bash', 'powershell', 'manual', 'aws', 'az', 'gcloud', 'kubectl']
       case executor['name']
         when 'manual'
           raise("`atomic_tests[#{i}].executor.steps` element is required") unless executor.has_key?('steps')
@@ -152,7 +175,7 @@ class AtomicRedTeam
                                          string: executor['steps'],
                                          string_description: "atomic_tests[#{i}].executor.steps"
 
-        when 'command_prompt', 'sh', 'bash', 'powershell'
+        when 'command_prompt', 'sh', 'bash', 'powershell', 'aws', 'az', 'gcloud', 'kubectl'
           raise("`atomic_tests[#{i}].executor.command` element is required") unless executor.has_key?('command')
           raise("`atomic_tests[#{i}].executor.command` element must be a string") unless executor['command'].is_a?(String)
 

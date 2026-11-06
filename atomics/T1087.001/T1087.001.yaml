@@ -1,5 +1,5 @@
 attack_technique: T1087.001
-display_name: 'Account Discovery: Local Account'
+display_name: "Account Discovery: Local Account"
 atomic_tests:
 - name: Enumerate all accounts (Local)
   auto_generated_guid: f8aab3dd-5990-4bf8-b8ab-2226c951696f
@@ -7,11 +7,10 @@ atomic_tests:
     Enumerate all accounts by copying /etc/passwd to another file
   supported_platforms:
   - linux
-  - macos
   input_arguments:
     output_file:
       description: Path where captured results will be placed
-      type: Path
+      type: path
       default: /tmp/T1087.001.txt
   executor:
     command: |
@@ -30,11 +29,12 @@ atomic_tests:
   input_arguments:
     output_file:
       description: Path where captured results will be placed
-      type: Path
+      type: path
       default: /tmp/T1087.001.txt
   executor:
     command: |
-      sudo cat /etc/sudoers > #{output_file}
+      if [ -f /etc/sudoers ]; then sudo cat /etc/sudoers > #{output_file}; fi;
+      if [ -f /usr/local/etc/sudoers ]; then sudo cat /usr/local/etc/sudoers > #{output_file}; fi;
       cat #{output_file}
     cleanup_command: |
       rm -f #{output_file}
@@ -50,11 +50,12 @@ atomic_tests:
   input_arguments:
     output_file:
       description: Path where captured results will be placed
-      type: Path
+      type: path
       default: /tmp/T1087.001.txt
   executor:
     command: |
       grep 'x:0:' /etc/passwd > #{output_file}
+      grep '*:0:' /etc/passwd >> #{output_file}
       cat #{output_file} 2>/dev/null
     cleanup_command: |
       rm -f #{output_file} 2>/dev/null
@@ -68,8 +69,16 @@ atomic_tests:
   - macos
   executor:
     command: |
-      username=$(echo $HOME | awk -F'/' '{print $3}') && lsof -u $username
+      username=$(id -u -n) && lsof -u $username
     name: sh
+  dependency_executor_name: sh
+  dependencies:
+  - description: |
+      check if lsof exists
+    prereq_command: |
+      which lsof
+    get_prereq_command: |
+      (which pkg && pkg install -y lsof)||(which yum && yum -y install lsof)||(which apt-get && DEBIAN_FRONTEND=noninteractive apt-get install -y lsof)
 - name: Show if a user account has ever logged in remotely
   auto_generated_guid: 0f0b6a29-08c3-44ad-a30b-47fd996b2110
   description: |
@@ -79,19 +88,20 @@ atomic_tests:
   input_arguments:
     output_file:
       description: Path where captured results will be placed
-      type: Path
+      type: path
       default: /tmp/T1087.001.txt
   dependency_executor_name: sh
   dependencies:
   - description: |
       Check if lastlog command exists on the machine
     prereq_command: |
-      if [ -x "$(command -v lastlog)" ]; then exit 0; else exit 1;
+      if [ -x "$(command -v lastlog)" ]; then exit 0; else exit 1; fi
     get_prereq_command: |
-      echo "Install lastlog on the machine to run the test."; exit 1;
+      sudo apt-get install login; exit 1;
   executor:
     command: |
-      lastlog > #{output_file}
+      [ "$(uname)" = 'FreeBSD' ] && cmd="lastlogin" || cmd="lastlog" 
+      $cmd > #{output_file}
       cat #{output_file}
     cleanup_command: |
       rm -f #{output_file}
@@ -126,7 +136,7 @@ atomic_tests:
   auto_generated_guid: 80887bec-5a9b-4efc-a81d-f83eb2eb32ab
   description: |
     Enumerate all accounts
-    Upon exection, multiple enumeration commands will be run and their output displayed in the PowerShell session
+    Upon execution, multiple enumeration commands will be run and their output displayed in the PowerShell session
   supported_platforms:
   - windows
   executor:
@@ -158,20 +168,49 @@ atomic_tests:
 - name: Enumerate logged on users via CMD (Local)
   auto_generated_guid: a138085e-bfe5-46ba-a242-74a6fb884af3
   description: |
-    Enumerate logged on users. Upon exeuction, logged on users will be displayed.
+    Enumerate logged on users. Upon execution, logged on users will be displayed.
   supported_platforms:
   - windows
   executor:
     command: |
       query user
     name: command_prompt
-- name: Enumerate logged on users via PowerShell
-  auto_generated_guid: 2bdc42c7-8907-40c2-9c2b-42919a00fe03
+- name: ESXi - Local Account Discovery via ESXCLI
+  auto_generated_guid: 9762ac6e-aa60-4449-a2f0-cbbd0e1fd22c
   description: |
-    Enumerate logged on users via PowerShell. Upon exeuction, logged on users will be displayed.
+    An adversary can use ESXCLI to enumerate a list of all local accounts on an ESXi host.
+    [Reference](https://lolesxi-project.github.io/LOLESXi/lolesxi/Binaries/esxcli/#account%20enumeration)"
   supported_platforms:
   - windows
+  input_arguments:
+    vm_host:
+      description: Specify the host name or IP of the ESXi server.
+      type: string
+      default: atomic.local
+    vm_user:
+      description: Specify the privilege user account on the ESXi server.
+      type: string
+      default: root
+    vm_pass:
+      description: Specify the privileged user's password.
+      type: string
+      default: password
+    plink_file:
+      description: Path to Plink
+      type: path
+      default: 'PathToAtomicsFolder\..\ExternalPayloads\plink.exe'
+  dependency_executor_name: powershell
+  dependencies:
+  - description: |
+      Check if we have plink
+    prereq_command: |
+      if (Test-Path "#{plink_file}") {exit 0} else {exit 1}
+    get_prereq_command: |
+      New-Item -Type Directory "PathToAtomicsFolder\..\ExternalPayloads\" -ErrorAction Ignore -Force | Out-Null
+      Invoke-WebRequest "https://the.earth.li/~sgtatham/putty/latest/w64/plink.exe" -OutFile "#{plink_file}" -UseBasicParsing
   executor:
     command: |
-      query user
-    name: powershell
+      echo "" | "#{plink_file}" -batch "#{vm_host}" -ssh -l #{vm_user} -pw "#{vm_pass}" "esxcli system account list"
+    name: command_prompt
+    elevation_required: false
+

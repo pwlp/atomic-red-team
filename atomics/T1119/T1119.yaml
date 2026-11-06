@@ -1,5 +1,5 @@
 attack_technique: T1119
-display_name: Automated Collection
+display_name: "Automated Collection"
 atomic_tests:
 - name: Automated Collection Command Prompt
   auto_generated_guid: cb379146-53f1-43e0-b884-7ce2c635ff5b
@@ -12,9 +12,9 @@ atomic_tests:
     command: |
       mkdir %temp%\T1119_command_prompt_collection >nul 2>&1
       dir c: /b /s .docx | findstr /e .docx
-      for /R c: %f in (*.docx) do copy %f %temp%\T1119_command_prompt_collection
+      for /R c:\ %f in (*.docx) do copy /Y %f %temp%\T1119_command_prompt_collection
     cleanup_command: |
-      del %temp%\T1119_command_prompt_collection /F /Q >null 2>&1
+      del %temp%\T1119_command_prompt_collection /F /Q >nul 2>&1
     name: command_prompt
 - name: Automated Collection PowerShell
   auto_generated_guid: 634bd9b9-dc83-4229-b19f-7f83ba9ad313
